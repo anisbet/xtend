@@ -47,7 +47,7 @@ logit()
         # If run from an interactive shell message STDERR.
         echo -e "[$time] $message" >&2
     fi
-    echo -e "[$time] $message" >>$LOG_FILE
+    echo -e "[$time] $message" >>"$LOG_FILE"
 }
 # Prints out usage message.
 usage()
@@ -66,7 +66,7 @@ Flags:
 -h, --help: This help message.
 -p, --profiles[profile1,profile2,...] Optional comma separated list of
   profiles not affected by extensions. None by default.
--t, --types[itemtype1,itemtype2,...] Optional comma separated list of
+-t, --item_types[itemtype1,itemtype2,...] Optional comma separated list of
   item types to ignore. None by default.
 -v, --version: Print watcher.sh version and exits.
  Example:
@@ -80,7 +80,7 @@ EOFU!
 # -l is for long options with double dash like --version
 # the comma separates different long options
 # -a is for long options with single dash like -version
-options=$(getopt -l "days:,extend:,help,profiles:,types:,version" -o "d:e:hp:t:v" -a -- "$@")
+options=$(getopt -l "days:,extend:,help,profiles:,item_types:,version" -o "d:e:hp:t:v" -a -- "$@")
 if [ $? != 0 ] ; then echo "Failed to parse options...exiting." >&2 ; exit 1 ; fi
 # set --:
 # If no arguments follow this option, then the positional parameters are unset. Otherwise, the positional parameters
@@ -106,7 +106,7 @@ do
         shift
         IGNORE_PROFILES="$1"
         ;;
-    -t|--types)
+    -t|--item_types)
         shift
         IGNORE_ITYPES="$1"
         ;;
@@ -121,6 +121,21 @@ do
     esac
     shift
 done
-# Required applications and email addresses check.
-: "${applications:?Missing -e,--extend}"
+# Required EXTENSION_TYPE check.
+: "${EXTENSION_TYPE:?Missing -e,--extend\=\'ON_SHELF\|DUE_DATE\'}"
 logit "$APP version $VERSION"
+[ -n "$IGNORE_ITYPES" ] && logit "Ignore item types: ($IGNORE_ITYPES)"
+[ -n "$IGNORE_PROFILES" ] && logit "Ignore profiles: ($IGNORE_PROFILES)"
+
+## Extend ON_SHELF
+if [ "$EXTENSION_TYPE" == "ON_SHELF" ]; then
+    logit "extending on shelf holds by $EXTEND_DAYS days"
+## Extend DUE_DATE
+elif [ "$EXTENSION_TYPE" == "DUE_DATE" ]; then
+    logit "extending due dates by $EXTEND_DAYS days"
+else 
+    logit "unrecognized extension type '$EXTENSION_TYPE'!"
+    exit 1
+fi
+logit "done"
+exit 0
