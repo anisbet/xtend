@@ -1,0 +1,126 @@
+#!/bin/bash
+###############################################################################
+#
+# xtend.sh extend holds and due dates in Symphony.
+# 
+#  Copyright 2024 Andrew Nisbet
+#  
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#  
+#       http://www.apache.org/licenses/LICENSE-2.0
+#  
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+#
+# Tue 06 Feb 2024 03:34:18 PM EST
+#
+###############################################################################
+set -o pipefail
+
+. ~/.bashrc
+
+VERSION="1.0.0"
+APP=$(basename "$0")
+WORKING_DIR='.'
+EXTEND_DAYS=7
+EXTENSION_TYPE=''
+IGNORE_PROFILES=''
+IGNORE_ITYPES=''
+## Set up logging.
+LOG_FILE="$WORKING_DIR/${APP}.log"
+# Logs messages to STDERR and $LOG file.
+# param:  Log file name. The file is expected to be a fully qualified path or the output
+#         will be directed to a file in the directory the script's running directory.
+# param:  Message to put in the file.
+# param:  (Optional) name of a operation that called this function.
+logit()
+{
+    local message="$1"
+    local time=''
+    time=$(date +"%Y-%m-%d %H:%M:%S")
+    if [ -t 0 ]; then
+        # If run from an interactive shell message STDERR.
+        echo -e "[$time] $message" >&2
+    fi
+    echo -e "[$time] $message" >>$LOG_FILE
+}
+# Prints out usage message.
+usage()
+{
+    cat << EOFU!
+ Usage: $APP [flags]
+
+extend holds and due dates in Symphony. Provisions are made to optionally
+exclude profiles, or item types.
+
+Flags:
+-d, --days[int] Optional number of days to put off the overdue or
+  expire deadline. Default 7.
+-e, --extend=["ON_SHELF"|"DUE_DATE"] Required option of either extend ON_SHELF
+  expiry, or exend DUE_DATE of items charged to customers.
+-h, --help: This help message.
+-p, --profiles[profile1,profile2,...] Optional comma separated list of
+  profiles not affected by extensions. None by default.
+-t, --types[itemtype1,itemtype2,...] Optional comma separated list of
+  item types to ignore. None by default.
+-v, --version: Print watcher.sh version and exits.
+ Example:
+    $APP --extend="ON_SHELF"
+EOFU!
+}
+
+### Check input parameters.
+# $@ is all command line parameters passed to the script.
+# -o is for short options like -v
+# -l is for long options with double dash like --version
+# the comma separates different long options
+# -a is for long options with single dash like -version
+options=$(getopt -l "days:,extend:,help,profiles:,types:,version" -o "d:e:hp:t:v" -a -- "$@")
+if [ $? != 0 ] ; then echo "Failed to parse options...exiting." >&2 ; exit 1 ; fi
+# set --:
+# If no arguments follow this option, then the positional parameters are unset. Otherwise, the positional parameters
+# are set to the arguments, even if some of them begin with a ‘-’.
+eval set -- "$options"
+
+while true
+do
+    case $1 in
+    -d|--days)
+        shift
+        EXTEND_DAYS="$1"
+        ;;
+    -e|--extend)
+        shift
+        EXTENSION_TYPE="$1"
+        ;;
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    -p|--profiles)
+        shift
+        IGNORE_PROFILES="$1"
+        ;;
+    -t|--types)
+        shift
+        IGNORE_ITYPES="$1"
+        ;;
+    -v|--version)
+        echo "$APP version: $VERSION"
+        exit 0
+        ;;
+    --)
+        shift
+        break
+        ;;
+    esac
+    shift
+done
+# Required applications and email addresses check.
+: "${applications:?Missing -e,--extend}"
+logit "$APP version $VERSION"
