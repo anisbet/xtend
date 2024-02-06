@@ -29,8 +29,8 @@ APP=$(basename "$0")
 WORKING_DIR='.'
 EXTEND_DAYS=7
 EXTENSION_TYPE=''
-IGNORE_PROFILES=''
-IGNORE_ITYPES=''
+PROFILES=''
+ITYPES=''
 ## Set up logging.
 LOG_FILE="$WORKING_DIR/${APP}.log"
 # Logs messages to STDERR and $LOG file.
@@ -64,14 +64,30 @@ Flags:
 -e, --extend=["ON_SHELF"|"DUE_DATE"] Required option of either extend ON_SHELF
   expiry, or exend DUE_DATE of items charged to customers.
 -h, --help: This help message.
--p, --profiles[profile1,profile2,...] Optional comma separated list of
-  profiles not affected by extensions. None by default.
+-p, --profiles[profile1,profile2,...] Optional comma separated subset of
+  profiles. If none, all profiles are affected. Use '~profile,...' to 
+  negate profiles.
 -t, --item_types[itemtype1,itemtype2,...] Optional comma separated list of
-  item types to ignore. None by default.
+  item types. If none provided select by all item types. Use '~TYPE,...'
+  to negate selection.
 -v, --version: Print watcher.sh version and exits.
  Example:
     $APP --extend="ON_SHELF"
+    $APP --extend="DUE_DATE" --days=10 --profiles="EPL_XDLOAN"
 EOFU!
+}
+
+# Function to select active available holds to be extended.
+# By default all holds are extended by 'n' days, regardless
+# of how many days are left before expiry.
+extend_shelf_holds()
+{
+    echo "on-shelf holds"
+}
+
+extend_due_dates()
+{
+    echo "due dates"
 }
 
 ### Check input parameters.
@@ -104,11 +120,11 @@ do
         ;;
     -p|--profiles)
         shift
-        IGNORE_PROFILES="$1"
+        PROFILES="$1"
         ;;
     -t|--item_types)
         shift
-        IGNORE_ITYPES="$1"
+        ITYPES="$1"
         ;;
     -v|--version)
         echo "$APP version: $VERSION"
@@ -124,17 +140,21 @@ done
 # Required EXTENSION_TYPE check.
 : "${EXTENSION_TYPE:?Missing -e,--extend\=\'ON_SHELF\|DUE_DATE\'}"
 logit "$APP version $VERSION"
-[ -n "$IGNORE_ITYPES" ] && logit "Ignore item types: ($IGNORE_ITYPES)"
-[ -n "$IGNORE_PROFILES" ] && logit "Ignore profiles: ($IGNORE_PROFILES)"
 
 ## Extend ON_SHELF
 if [ "$EXTENSION_TYPE" == "ON_SHELF" ]; then
     logit "extending on shelf holds by $EXTEND_DAYS days"
+    [ -n "$ITYPES" ] && logit "item types ($ITYPES)"
+    [ -n "$PROFILES" ] && logit "profiles ($PROFILES)"
+    extend_shelf_holds
 ## Extend DUE_DATE
 elif [ "$EXTENSION_TYPE" == "DUE_DATE" ]; then
     logit "extending due dates by $EXTEND_DAYS days"
+    [ -n "$ITYPES" ] && logit "item types ($ITYPES)"
+    [ -n "$PROFILES" ] && logit "profiles ($PROFILES)"
+    extend_due_dates
 else 
-    logit "unrecognized extension type '$EXTENSION_TYPE'!"
+    logit "unrecognized extension type '$EXTENSION_TYPE', exiting."
     exit 1
 fi
 logit "done"
