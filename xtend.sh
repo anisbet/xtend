@@ -25,7 +25,7 @@ set -o pipefail
 . ~/.bashrc
 
 VERSION="1.0.0"
-APP=$(basename "$0")
+APP=$(basename -s .sh "$0")
 WORKING_DIR='.'
 EXTEND_DAYS=7
 EXTENSION_TYPE=''
