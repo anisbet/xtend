@@ -28,6 +28,7 @@ VERSION="1.0.0"
 APP=$(basename -s .sh "$0")
 WORKING_DIR='.'
 EXTEND_DAYS=7
+IS_ABS_EXTENSION=true
 EXTENSION_TYPE=''
 PROFILES=''
 ITYPES=''
@@ -67,6 +68,9 @@ Flags:
 -p, --profiles[profile1,profile2,...] Optional comma separated subset of
   profiles. If none, all profiles are affected. Use '~profile,...' to 
   negate profiles.
+-r, --relative Optional adds 'n' --days to the current due date.
+  By default absolute dates are used, meaning all extensions are set to 
+  'n' --days from now.
 -t, --item_types[itemtype1,itemtype2,...] Optional comma separated list of
   item types. If none provided select by all item types. Use '~TYPE,...'
   to negate selection.
@@ -91,8 +95,13 @@ extend_shelf_holds()
 extend_due_dates()
 {
     # Use editcharge 
-    # -d change due date and time to the specified value. Default time is midnight. You need to pass in additional 2359 to make it end of day due date.
-    echo "due dates"
+    # -d change due date and time to the specified value. Default time is midnight. 
+    # You need to pass in additional 2359 to make it end of day due date.
+    # U=user key, K=charge key, d=due date.
+    selcharge -tACTIVE -oUKd >"$WORKING_DIR/xtend_charges.lst"
+    
+    
+    # Update selected records.
 }
 
 ### Check input parameters.
@@ -101,7 +110,7 @@ extend_due_dates()
 # -l is for long options with double dash like --version
 # the comma separates different long options
 # -a is for long options with single dash like -version
-options=$(getopt -l "days:,extend:,help,profiles:,item_types:,version" -o "d:e:hp:t:v" -a -- "$@")
+options=$(getopt -l "days:,extend:,help,profiles:,relative,item_types:,version" -o "d:e:hp:rt:v" -a -- "$@")
 if [ $? != 0 ] ; then echo "Failed to parse options...exiting." >&2 ; exit 1 ; fi
 # set --:
 # If no arguments follow this option, then the positional parameters are unset. Otherwise, the positional parameters
@@ -111,6 +120,9 @@ eval set -- "$options"
 while true
 do
     case $1 in
+    -r|--relative)
+        IS_ABS_EXTENSION=false
+        ;;
     -d|--days)
         shift
         EXTEND_DAYS="$1"
@@ -148,13 +160,21 @@ logit "$APP version $VERSION"
 
 ## Extend ON_SHELF
 if [ "$EXTENSION_TYPE" == "ON_SHELF" ]; then
-    logit "extending on shelf holds by $EXTEND_DAYS days"
+    if [ "$IS_ABS_EXTENSION" == true ]; then
+        logit "suspending all on-shelf holds until $EXTEND_DAYS days hence"
+    else
+        logit "suspending each on-shelf holds for $EXTEND_DAYS days"
+    fi
     [ -n "$ITYPES" ] && logit "item types ($ITYPES)"
     [ -n "$PROFILES" ] && logit "profiles ($PROFILES)"
     extend_shelf_holds
 ## Extend DUE_DATE
 elif [ "$EXTENSION_TYPE" == "DUE_DATE" ]; then
-    logit "extending due dates by $EXTEND_DAYS days"
+    if [ "$IS_ABS_EXTENSION" == true ]; then
+        logit "extending all due dates to $EXTEND_DAYS days hence"
+    else
+        logit "extending existing due dates by $EXTEND_DAYS days"
+    fi
     [ -n "$ITYPES" ] && logit "item types ($ITYPES)"
     [ -n "$PROFILES" ] && logit "profiles ($PROFILES)"
     extend_due_dates
