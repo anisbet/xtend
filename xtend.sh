@@ -82,11 +82,16 @@ EOFU!
 # of how many days are left before expiry.
 extend_shelf_holds()
 {
+    # Check if we can suspend active available holds.
+    # -1 changes the suspend begin date to the specified value.
+    # -2 changes the suspend end date to the specified value.
     echo "on-shelf holds"
 }
 
 extend_due_dates()
 {
+    # Use editcharge 
+    # -d change due date and time to the specified value. Default time is midnight. You need to pass in additional 2359 to make it end of day due date.
     echo "due dates"
 }
 
