@@ -31,9 +31,10 @@ ILS=true
 [ "$SERVER" != 'edpl.sirsidynix.net' ] && ILS=false
 WORKING_DIR='.'
 EXTEND_DAYS=7
-EXTENSION_TYPE=''
+ITEM_TYPES=''
 PROFILES=''
 ITYPES=''
+DRY_RUN=true
 ## Set up logging.
 LOG_FILE="$WORKING_DIR/${APP}.log"
 # Logs messages to STDERR and $LOG file.
@@ -73,7 +74,8 @@ Flags:
 -t, --item_types[itemtype1,itemtype2,...] Optional comma separated list of
   item types. If none provided select by all item types. Use '~TYPE,...'
   to negate selection.
--v, --version: Print watcher.sh version and exits.
+-u, --update Actually make changes otherwise just do a dry run.
+-v, --version Print $APP version and exits.
  Example:
     $APP --extend="ON_SHELF"
     $APP --extend="DUE_DATE" --days=10 --profiles="EPL_XDLOAN"
@@ -95,17 +97,52 @@ extend_due_dates()
 {
     local charges_list="$WORKING_DIR/xtend_charges.lst"
     local edit_charges_list="$WORKING_DIR/xtend_edit_charges.lst"
+    local tmp_file="$WORKING_DIR/xtend_tmp.lst"
+    touch $tmp_file
     # -d change due date and time to the specified value. Default time is midnight. 
     # You need to pass in additional 2359 to make it end of day due date.
     # U=user key, K=charge key, d=due date.
     # Some due dates are 'NEVER' so exclude them with pipe.pl.
-    selcharge -tACTIVE -oUKd | pipe.pl -Gc5:NEVER >"$charges_list"
-    # 12345|4567890|21|1|1|NEVER|
-    # 12345|2595784|1|1|1|202402242359|
-    # You can now sub select by profile or item type here
-    pipe.pl -oc1,c2,c3,c4 -P < "$charges_list" >"$edit_charges_list"
-    # Update selected records with editcharge
-    editcharge -d "${EXTEND_DATE}2359" <"$edit_charges_list" >"$LOG_FILE"
+    if [ $ILS == true ]; then
+        selcharge -tACTIVE -oUKd | pipe.pl -Gc5:NEVER >"$charges_list"
+    else
+        echo -e "12345|4567890|21|1|1|202402282359|\n12345|2595784|1|1|1|202402242359|" >"$charges_list"
+        # 12345|4567890|21|1|1|202402282359|
+        # 12345|2595784|12|1|1|202402242359|
+    fi
+    # You can now sub-select by profile or item type here
+    if [ -n "$PROFILES" ]; then
+        if [ $ILS == true ]; then
+            seluser -iU -oUS -p"$PROFILES" < "$charges_list" >"$tmp_file"
+        else
+            cat "$charges_list" >"$tmp_file"
+        fi
+    fi
+    if [ -n "$ITEM_TYPES" ]; then
+        if [ $ILS == true ]; then
+            pipe.pl -oc1,c2,c3,remaining -P < "$charges_list" | selitem -iI -oIS -t"$ITEM_TYPES" | pipe.pl -oc3,c0,c1,c2,c4,continue >>"$tmp_file"
+        else
+            # 12345|2595784|12|1|1|202402242359| => 2595784|12|1|12345|1|202402242359| => 2595784|12|1|12345|1|202402242359| => 12345|2595784|12|1|1|202402242359|
+            pipe.pl -oc1,c2,c3,remaining -P < "$charges_list" | cat - | pipe.pl -oc3,c0,c1,c2,c4,continue >>"$tmp_file"
+        fi
+    fi
+    if [ -s "$tmp_file" ]; then
+        pipe.pl -oc1,c2,c3,c4 -P < "$tmp_file" | sort | uniq  >"$edit_charges_list"
+    else
+        pipe.pl -oc1,c2,c3,c4 -P < "$charges_list" >"$edit_charges_list"
+    fi
+    if [ "$DRY_RUN" == true ]; then
+        logit "Dry run mode: check $charges_list and $edit_charges_list for changes."
+    else
+        # Update selected records with editcharge
+        if [ $ILS == true ]; then
+            editcharge -d "${EXTEND_DATE}2359" <"$edit_charges_list" 2>>"$LOG_FILE"
+        else
+            logit "DEV: pretending to run update."
+        fi
+    fi
+    logit "preserving $charges_list and $edit_charges_list"
+    rm "$tmp_file"
 }
 
 ### Check input parameters.
@@ -114,7 +151,7 @@ extend_due_dates()
 # -l is for long options with double dash like --version
 # the comma separates different long options
 # -a is for long options with single dash like -version
-options=$(getopt -l "days:,extend:,help,profiles:,item_types:,version" -o "d:e:hp:t:v" -a -- "$@")
+options=$(getopt -l "days:,extend:,help,profiles:,item_types:,update,version" -o "d:e:hp:t:uv" -a -- "$@")
 if [ $? != 0 ] ; then echo "Failed to parse options...exiting." >&2 ; exit 1 ; fi
 # set --:
 # If no arguments follow this option, then the positional parameters are unset. Otherwise, the positional parameters
@@ -130,7 +167,7 @@ do
         ;;
     -e|--extend)
         shift
-        EXTENSION_TYPE="$1"
+        ITEM_TYPES="$1"
         ;;
     -h|--help)
         usage
@@ -144,6 +181,9 @@ do
         shift
         ITYPES="$1"
         ;;
+    -u|--update)
+        DRY_RUN=false
+        ;;
     -v|--version)
         echo "$APP version: $VERSION"
         exit 0
@@ -155,8 +195,8 @@ do
     esac
     shift
 done
-# Required EXTENSION_TYPE check.
-: "${EXTENSION_TYPE:?Missing -e,--extend\=\'ON_SHELF\|DUE_DATE\'}"
+# Required ITEM_TYPES check.
+: "${ITEM_TYPES:?Missing -e,--extend\=\'ON_SHELF\|DUE_DATE\'}"
 if [ "$ILS" == true ]; then
     EXTEND_DATE=$(transdate -d+"$EXTEND_DAYS")
 else
@@ -165,20 +205,21 @@ else
 fi
 [ -n "$EXTEND_DATE" ]|| { logit "**error, date not calculated."; exit 1; }
 logit "$APP version $VERSION"
+[ "$DRY_RUN" == true ] && logit "Dry run mode. Use --update to make changes."
 ## Extend ON_SHELF
-if [ "$EXTENSION_TYPE" == "ON_SHELF" ]; then
+if [ "$ITEM_TYPES" == "ON_SHELF" ]; then
     logit "suspending all on-shelf holds for $EXTEND_DAYS days, or '$EXTEND_DATE'"
     [ -n "$ITYPES" ] && logit "item types ($ITYPES)"
     [ -n "$PROFILES" ] && logit "profiles ($PROFILES)"
     extend_shelf_holds
 ## Extend DUE_DATE
-elif [ "$EXTENSION_TYPE" == "DUE_DATE" ]; then
+elif [ "$ITEM_TYPES" == "DUE_DATE" ]; then
     logit "extending all due dates by $EXTEND_DAYS days, or '$EXTEND_DATE'"
     [ -n "$ITYPES" ] && logit "item types ($ITYPES)"
     [ -n "$PROFILES" ] && logit "profiles ($PROFILES)"
     extend_due_dates
 else 
-    logit "unrecognized extension type '$EXTENSION_TYPE', exiting."
+    logit "unrecognized extension type '$ITEM_TYPES', exiting."
     exit 1
 fi
 logit "done"
