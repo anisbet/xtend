@@ -64,7 +64,7 @@ exclude profiles, or item types.
 
 Flags:
 -d, --days[int] Optional number of days to put off the overdue or
-  expire deadline. Default 7.
+  expire deadline. Default $EXTEND_DAYS.
 -e, --extend=["ON_SHELF"|"DUE_DATE"] Required option of either extend ON_SHELF
   expiry, or exend DUE_DATE of items charged to customers.
 -h, --help: This help message.
@@ -74,7 +74,7 @@ Flags:
 -t, --item_types[itemtype1,itemtype2,...] Optional comma separated list of
   item types. If none provided select by all item types. Use '~TYPE,...'
   to negate selection.
--u, --update Actually make changes otherwise just do a dry run.
+-u, --update Actually make changes. By default $APP does a dry run.
 -v, --version Print $APP version and exits.
  Example:
     $APP --extend="ON_SHELF"
