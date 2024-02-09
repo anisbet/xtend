@@ -35,6 +35,7 @@ ITEM_TYPES=''
 PROFILES=''
 ITYPES=''
 DRY_RUN=true
+RELATIVE_DATE=false
 ## Set up logging.
 LOG_FILE="$WORKING_DIR/${APP}.log"
 # Logs messages to STDERR and $LOG file.
@@ -71,6 +72,8 @@ Flags:
 -p, --profiles[profile1,profile2,...] Optional comma separated subset of
   profiles. If none, all profiles are affected. Use '~profile,...' to 
   negate profiles.
+-r, --relative Extends each selected items'' current due or expire date
+  by 'n' --days. By default $APP sets all due or expiry dates to the same date.
 -t, --item_types[itemtype1,itemtype2,...] Optional comma separated list of
   item types. If none provided select by all item types. Use '~TYPE,...'
   to negate selection.
@@ -118,6 +121,59 @@ extend_shelf_holds()
     logit "overwritten next time. See $receipt_file for before / after comparison."
 }
 
+# Extends due dates on each item by it's current due date +EXTEND_DAYS.
+relative_due_date_extension()
+{
+    local charges="$1"  # 12345|4567890|21|1|1|202402082359|
+    local edit_charges="$2"  # 4567890|21|1|1|
+    local receipt="$3"
+    local item_key=''
+    local item_due_date=''
+    local new_due_date=''
+    local tmp_file="$WORKING_DIR/xtend_00.tmp"
+    while read -r LINE; do
+        item_key=$(echo "$LINE" | pipe.pl -oc1,c2,c3 -P)
+        item_due_date=$(echo "$LINE" | pipe.pl -oc5 | pipe.pl -mc0:########_)
+        # Update selected records with editcharge
+        if [ "$ILS" == true ]; then
+            new_due_date=$(transdate -p "$item_due_date"+"$EXTEND_DAYS")
+            echo "$item_key" | editcharge -d "${new_due_date}2359" 2>>"$LOG_FILE"
+        else
+            logit "DEV: pretending to run update."
+            new_due_date=$(date -d "$item_due_date +$EXTEND_DAYS days" '+%Y%m%d')
+            echo "$LINE" | pipe.pl -mc5:"${new_due_date}2359_" >>"$tmp_file"
+        fi
+    done <"$charges"
+    # Save changes for auditing
+    if [ "$ILS" == true ]; then
+        # Take a snapshot of changes for comparison.
+        pipe.pl -oc1,continue <"$charges" | selcharge -iK -oUKd >"$tmp_file"
+    fi
+    echo "== break" >>"$receipt"
+    diff -y "$charges" "$tmp_file" >>"$receipt"
+    rm "$tmp_file"
+}
+
+# Sets all selected charge due dates to a specific date.
+absolute_due_date_extension()
+{
+    local charges="$1"  # 12345|4567890|21|1|1|202402082359|
+    local edit_charges="$2"  # 4567890|21|1|1|
+    local receipt="$3"
+    local tmp_file="$WORKING_DIR/xtend_00.tmp"
+    # Update selected records with editcharge
+    if [ $ILS == true ]; then
+        editcharge -d "${EXTEND_DATE}2359" <"$edit_charges" 2>>"$LOG_FILE"
+        # Take a snapshot of changes for comparison.
+        selcharge -tACTIVE -oUKd | pipe.pl -Gc5:NEVER >"$tmp_file"
+    else
+        logit "DEV: pretending to run update."
+        pipe.pl -mc5:"${EXTEND_DATE}2359_" <"$charges_list" >"$tmp_file"
+    fi
+    diff -y "$charges_list" "$tmp_file" >>"$receipt_file"
+    rm "$tmp_file"
+}
+
 # Extends due dates on all materials by default or based on items' types 
 # or profiles of borrowers.
 # params: None
@@ -162,16 +218,10 @@ extend_due_dates()
     if [ "$DRY_RUN" == true ]; then
         logit "Dry run mode: check $charges_list and $edit_charges_list for changes."
     else
-        # Update selected records with editcharge
-        if [ $ILS == true ]; then
-            editcharge -d "${EXTEND_DATE}2359" <"$edit_charges_list" 2>>"$LOG_FILE"
-            # Take a snapshot of changes for comparison.
-            selcharge -tACTIVE -oUKd | pipe.pl -Gc5:NEVER >"$tmp_file"
-            diff -y "$charges_list" "$tmp_file" >>"$receipt_file"
+        if [ "$RELATIVE_DATE" == true ]; then
+            relative_due_date_extension "$charges_list" "$edit_charges_list" "$receipt_file"
         else
-            logit "DEV: pretending to run update."
-            pipe.pl -mc5:"${EXTEND_DATE}2359_" <"$charges_list" >"$tmp_file"
-            diff -y "$charges_list" "$tmp_file" >>"$receipt_file"
+            absolute_due_date_extension "$charges_list" "$edit_charges_list" "$receipt_file"
         fi
     fi
     logit "preserving $charges_list and $edit_charges_list, though they will be"
@@ -185,7 +235,7 @@ extend_due_dates()
 # -l is for long options with double dash like --version
 # the comma separates different long options
 # -a is for long options with single dash like -version
-options=$(getopt -l "days:,extend:,help,profiles:,item_types:,update,version" -o "d:e:hp:t:uv" -a -- "$@")
+options=$(getopt -l "days:,extend:,help,profiles:,relative,item_types:,update,version" -o "d:e:hp:rt:uv" -a -- "$@")
 if [ $? != 0 ] ; then echo "Failed to parse options...exiting." >&2 ; exit 1 ; fi
 # set --:
 # If no arguments follow this option, then the positional parameters are unset. Otherwise, the positional parameters
@@ -210,6 +260,9 @@ do
     -p|--profiles)
         shift
         PROFILES="$1"
+        ;;
+    -r|--relative)
+        RELATIVE_DATE=true
         ;;
     -t|--item_types)
         shift
