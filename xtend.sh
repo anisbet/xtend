@@ -90,14 +90,44 @@ extend_shelf_holds()
     # Check if we can suspend active available holds.
     # -1 changes the suspend begin date to the specified value.
     # -2 changes the suspend end date to the specified value.
-    echo "on-shelf holds"
+    # -6 the date available hold expires. Both selhold and edithold.
+    local pre_aa_holds_list="$WORKING_DIR/xtend_pre_aa_holds.lst"
+    local post_aa_holds_list="$WORKING_DIR/xtend_post_aa_holds.lst"
+    local receipt_file="$WORKING_DIR/xtend_hold_changes.diff"
+    if [ $ILS == true ]; then
+        selhold -jACTIVE -aY -oK6 >"$pre_aa_holds_list"
+    else
+        echo -e "43167775|20240208|\n43167781|20240208|" >"$pre_aa_holds_list"
+    fi
+    # It doesn't make sense to exclude holds by profile or item types.
+    if [ "$DRY_RUN" == true ]; then
+        logit "Dry run mode: check $pre_aa_holds_list for before and $post_aa_holds_list for changes."
+    else
+        # Update selected records with editcharge
+        if [ $ILS == true ]; then
+            edithold -6 "$EXTEND_DATE" <"$pre_aa_holds_list" 2>>"$LOG_FILE"
+            selhold -jACTIVE -aY -oK6 >"$post_aa_holds_list"
+            diff -y "$pre_aa_holds_list" "$post_aa_holds_list" >>"$receipt_file"
+        else
+            logit "DEV: pretending to run update."
+            pipe.pl -mc1:"${EXTEND_DATE}_" -P <"$pre_aa_holds_list" >>"$post_aa_holds_list"
+            diff -y "$pre_aa_holds_list" "$post_aa_holds_list" >>"$receipt_file"
+        fi
+    fi
+    logit "preserving $pre_aa_holds_list and $post_aa_holds_list, though they will be"
+    logit "overwritten next time. See $receipt_file for before / after comparison."
 }
 
+# Extends due dates on all materials by default or based on items' types 
+# or profiles of borrowers.
+# params: None
+# Creates xtend_charge_changes.lst - all accumulated changes to changes made to date.
 extend_due_dates()
 {
     local charges_list="$WORKING_DIR/xtend_charges.lst"
     local edit_charges_list="$WORKING_DIR/xtend_edit_charges.lst"
     local tmp_file="$WORKING_DIR/xtend_tmp.lst"
+    local receipt_file="$WORKING_DIR/xtend_charge_changes.diff"
     touch $tmp_file
     # -d change due date and time to the specified value. Default time is midnight. 
     # You need to pass in additional 2359 to make it end of day due date.
@@ -106,9 +136,7 @@ extend_due_dates()
     if [ $ILS == true ]; then
         selcharge -tACTIVE -oUKd | pipe.pl -Gc5:NEVER >"$charges_list"
     else
-        echo -e "12345|4567890|21|1|1|202402282359|\n12345|2595784|1|1|1|202402242359|" >"$charges_list"
-        # 12345|4567890|21|1|1|202402282359|
-        # 12345|2595784|12|1|1|202402242359|
+        echo -e "12345|4567890|21|1|1|202402082359|\n12345|2595784|1|1|1|202402242359|" >"$charges_list"
     fi
     # You can now sub-select by profile or item type here
     if [ -n "$PROFILES" ]; then
@@ -137,11 +165,17 @@ extend_due_dates()
         # Update selected records with editcharge
         if [ $ILS == true ]; then
             editcharge -d "${EXTEND_DATE}2359" <"$edit_charges_list" 2>>"$LOG_FILE"
+            # Take a snapshot of changes for comparison.
+            selcharge -tACTIVE -oUKd | pipe.pl -Gc5:NEVER >"$tmp_file"
+            diff -y "$charges_list" "$tmp_file" >>"$receipt_file"
         else
             logit "DEV: pretending to run update."
+            pipe.pl -mc5:"${EXTEND_DATE}2359_" <"$charges_list" >"$tmp_file"
+            diff -y "$charges_list" "$tmp_file" >>"$receipt_file"
         fi
     fi
-    logit "preserving $charges_list and $edit_charges_list"
+    logit "preserving $charges_list and $edit_charges_list, though they will be"
+    logit "overwritten next time. See $receipt_file for before / after comparison."
     rm "$tmp_file"
 }
 
