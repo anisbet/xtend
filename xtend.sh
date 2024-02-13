@@ -36,6 +36,8 @@ PROFILES=''
 ITYPES=''
 DRY_RUN=true
 RELATIVE_DATE=false
+IS_TEST=false
+TEST_COUNT=1
 ## Set up logging.
 LOG_FILE="$WORKING_DIR/${APP}.log"
 # Logs messages to STDERR and $LOG file.
@@ -50,7 +52,7 @@ logit()
     time=$(date +"%Y-%m-%d %H:%M:%S")
     if [ -t 0 ]; then
         # If run from an interactive shell message STDERR.
-        echo -e "[$time] $message" >&2
+        echo -e "[$time] $message"
     fi
     echo -e "[$time] $message" >>"$LOG_FILE"
 }
@@ -64,19 +66,20 @@ extend holds and due dates in Symphony. Provisions are made to optionally
 exclude profiles, or item types.
 
 Flags:
--d, --days[int] Optional number of days to put off the overdue or
+-d, --days=[int] Optional number of days to put off the overdue or
   expire deadline. Default $EXTEND_DAYS.
 -e, --extend=["ON_SHELF"|"DUE_DATE"] Required option of either extend ON_SHELF
   expiry, or exend DUE_DATE of items charged to customers.
 -h, --help: This help message.
+-i, --item_types=[itemtype1,itemtype2,...] Optional comma separated list of
+  item types. If none provided select by all item types. Use '~TYPE,...'
+  to negate selection.
 -p, --profiles[profile1,profile2,...] Optional comma separated subset of
   profiles. If none, all profiles are affected. Use '~profile,...' to 
   negate profiles.
 -r, --relative Extends each selected items'' current due or expire date
   by 'n' --days. By default $APP sets all due or expiry dates to the same date.
--t, --item_types[itemtype1,itemtype2,...] Optional comma separated list of
-  item types. If none provided select by all item types. Use '~TYPE,...'
-  to negate selection.
+-t, --test=[int] Use test mode, only process the first 'n' records, then exit.
 -u, --update Actually make changes. By default $APP does a dry run.
 -v, --version Print $APP version and exits.
  Example:
@@ -150,11 +153,20 @@ extend_shelf_holds()
     local pre_aa_holds_list="$WORKING_DIR/xtend_pre_aa_holds.lst"
     local post_aa_holds_list="$WORKING_DIR/xtend_post_aa_holds.lst"
     local receipt_file="$WORKING_DIR/xtend_hold_changes.diff"
+    local test_data="43167775|20240208|\n43167781|20240224|"
     if [ $ILS == true ]; then
         # Select all active and available holds, saving the hold key and on-shelf hold expires date.
-        selhold -jACTIVE -aY -oK6 >"$pre_aa_holds_list"
+        if [ "$IS_TEST" == true ]; then
+            selhold -jACTIVE -aY -oK6 | head --lines="$TEST_COUNT" >"$pre_aa_holds_list"
+        else
+            selhold -jACTIVE -aY -oK6 >"$pre_aa_holds_list"
+        fi
     else
-        echo -e "43167775|20240208|\n43167781|20240224|" >"$pre_aa_holds_list"
+        if [ "$IS_TEST" == true ]; then
+            echo -e "$test_data" | head --lines="$TEST_COUNT" >"$pre_aa_holds_list"
+        else
+            echo -e "$test_data" >"$pre_aa_holds_list"
+        fi
     fi
     # It doesn't make sense to exclude holds by profile or item types.
     if [ "$DRY_RUN" == true ]; then
@@ -236,15 +248,24 @@ extend_due_dates()
     local edit_charges_list="$WORKING_DIR/xtend_edit_charges.lst"
     local tmp_file="$WORKING_DIR/xtend_tmp.lst"
     local receipt_file="$WORKING_DIR/xtend_charge_changes.diff"
+    local test_data="12345|4567890|21|1|1|202402082359|\n12345|2595784|1|1|1|202402242359|"
     touch $tmp_file
     # -d change due date and time to the specified value. Default time is midnight. 
     # You need to pass in additional 2359 to make it end of day due date.
     # U=user key, K=charge key, d=due date.
     # Some due dates are 'NEVER' so exclude them with pipe.pl.
     if [ $ILS == true ]; then
-        selcharge -tACTIVE -oUKd | pipe.pl -Gc5:NEVER >"$charges_list"
+        if [ "$IS_TEST" == true ]; then
+            selcharge -tACTIVE -oUKd | pipe.pl -Gc5:NEVER | head --lines="$TEST_COUNT" >"$charges_list"
+        else
+            selcharge -tACTIVE -oUKd | pipe.pl -Gc5:NEVER >"$charges_list"
+        fi
     else
-        echo -e "12345|4567890|21|1|1|202402082359|\n12345|2595784|1|1|1|202402242359|" >"$charges_list"
+        if [ "$IS_TEST" == true ]; then
+            echo -e "$test_data" | head --lines="$TEST_COUNT" >"$charges_list"
+        else
+            echo -e "$test_data" >"$charges_list"
+        fi
     fi
     # You can now sub-select by profile or item type here
     if [ -n "$PROFILES" ]; then
@@ -267,6 +288,7 @@ extend_due_dates()
         # Remove duplicate lines those that matched the first and second selection above.
         pipe.pl -oc1,c2,c3,c4 -P < "$tmp_file" | sort | uniq  >"$edit_charges_list"
     else
+        # No tmp file if no profiles AND no item types were specified.
         pipe.pl -oc1,c2,c3,c4 -P < "$charges_list" >"$edit_charges_list"
     fi
     if [ "$DRY_RUN" == true ]; then
@@ -289,7 +311,7 @@ extend_due_dates()
 # -l is for long options with double dash like --version
 # the comma separates different long options
 # -a is for long options with single dash like -version
-options=$(getopt -l "days:,extend:,help,profiles:,relative,item_types:,update,version" -o "d:e:hp:rt:uv" -a -- "$@")
+options=$(getopt -l "days:,extend:,help,item_types:,profiles:,relative,test:,update,version" -o "d:e:hi:p:rt:uv" -a -- "$@")
 if [ $? != 0 ] ; then echo "Failed to parse options...exiting." >&2 ; exit 1 ; fi
 # set --:
 # If no arguments follow this option, then the positional parameters are unset. Otherwise, the positional parameters
@@ -318,9 +340,18 @@ do
     -r|--relative)
         RELATIVE_DATE=true
         ;;
-    -t|--item_types)
+    -i|--item_types)
         shift
         ITYPES="$1"
+        ;;
+    -t|--test)
+        shift
+        if ! [[ "$1" =~ ^[0-9]+$ ]]; then 
+            logit "**error: must be an integer. Exiting."
+            exit 1 
+        fi
+        IS_TEST=true
+        TEST_COUNT="$1"
         ;;
     -u|--update)
         DRY_RUN=false

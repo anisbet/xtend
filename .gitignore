@@ -13,5 +13,3 @@ inc/
 /*.zip
 *.log
 *.lst
-*.diff
-*.test

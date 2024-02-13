@@ -1,4 +1,4 @@
-.PHONY: clean pristine production
+.PHONY: clean pristine production test
 
 clean:
 	-rm *.lst
@@ -10,3 +10,6 @@ pristine: clean
 
 production:
 	scp xtend.sh sirsi@edpl.sirsidynix.net:/software/EDPL/Unicorn/Bincustom
+
+test: test.sh
+	./test.sh
