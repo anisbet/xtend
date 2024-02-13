@@ -96,9 +96,12 @@ relative_hold_self_extension()
     local hold_expires_date=''
     local new_hold_expires_date=''
     while read -r LINE; do
+        # The hold key is used when it's time for 'edithold'
         hold_key=$(echo "$LINE" | pipe.pl -oc0 -P)
+        # Get the current hold expires on shelf date (not hold expires date, that's a year from now)
         hold_expires_date=$(echo "$LINE" | pipe.pl -oc1)
         if [ "$ILS" == true ]; then
+            # Compute the new hold expires date based on the current expiry date.
             new_hold_expires_date=$(transdate -p "$hold_expires_date"+"$EXTEND_DAYS")
             echo "$hold_key" | edithold -6 "$new_hold_expires_date" 2>>"$LOG_FILE"
         else
@@ -108,6 +111,7 @@ relative_hold_self_extension()
         fi
     done <"$pre_aa_holds"
     if [ "$ILS" == true ]; then
+        # Capture changes and save to the 'receipt' file as a before / after diff.
         selhold -jACTIVE -aY -oK6 >"$post_aa_holds"
     fi
     echo "== break" >>"$receipt"
@@ -123,6 +127,7 @@ absolute_hold_self_extension()
     local receipt="$3"
     # Update selected records with editcharge
     if [ "$ILS" == true ]; then
+        # Set all holds to expire on '$EXTEND_DATE' regardless of the current date.
         edithold -6 "$EXTEND_DATE" <"$pre_aa_holds" 2>>"$LOG_FILE"
         selhold -jACTIVE -aY -oK6 >"$post_aa_holds"
     else
@@ -146,6 +151,7 @@ extend_shelf_holds()
     local post_aa_holds_list="$WORKING_DIR/xtend_post_aa_holds.lst"
     local receipt_file="$WORKING_DIR/xtend_hold_changes.diff"
     if [ $ILS == true ]; then
+        # Select all active and available holds, saving the hold key and on-shelf hold expires date.
         selhold -jACTIVE -aY -oK6 >"$pre_aa_holds_list"
     else
         echo -e "43167775|20240208|\n43167781|20240224|" >"$pre_aa_holds_list"
@@ -171,20 +177,21 @@ relative_due_date_extension()
     local charges="$1"  # 12345|4567890|21|1|1|202402082359|
     local edit_charges="$2"  # 4567890|21|1|1|
     local receipt="$3"
-    local item_key=''
-    local item_due_date=''
+    local charge_key=''
+    local due_date=''
     local new_due_date=''
     local tmp_file="$WORKING_DIR/xtend_00.tmp"
     while read -r LINE; do
-        item_key=$(echo "$LINE" | pipe.pl -oc1,c2,c3 -P)
-        item_due_date=$(echo "$LINE" | pipe.pl -oc5 | pipe.pl -mc0:########_)
+        # Capture the charge_key for 'editcharge'. 
+        charge_key=$(echo "$LINE" | pipe.pl -oc1,c2,c3,c4 -P)
+        due_date=$(echo "$LINE" | pipe.pl -oc5 | pipe.pl -mc0:########_)
         # Update selected records with editcharge
         if [ "$ILS" == true ]; then
-            new_due_date=$(transdate -p "$item_due_date"+"$EXTEND_DAYS")
-            echo "$item_key" | editcharge -d "${new_due_date}2359" 2>>"$LOG_FILE"
+            new_due_date=$(transdate -p "$due_date"+"$EXTEND_DAYS")
+            echo "$charge_key" | editcharge -d "${new_due_date}2359" 2>>"$LOG_FILE"
         else
             logit "DEV: pretending to run update."
-            new_due_date=$(date -d "$item_due_date +$EXTEND_DAYS days" '+%Y%m%d')
+            new_due_date=$(date -d "$due_date +$EXTEND_DAYS days" '+%Y%m%d')
             echo "$LINE" | pipe.pl -mc5:"${new_due_date}2359_" >>"$tmp_file"
         fi
     done <"$charges"
@@ -249,6 +256,7 @@ extend_due_dates()
     fi
     if [ -n "$ITEM_TYPES" ]; then
         if [ $ILS == true ]; then
+            # Using the item key in c1,2,3 add (or filter out with '~') items of a given type.
             pipe.pl -oc1,c2,c3,remaining -P < "$charges_list" | selitem -iI -oIS -t"$ITEM_TYPES" | pipe.pl -oc3,c0,c1,c2,c4,continue >>"$tmp_file"
         else
             # 12345|2595784|12|1|1|202402242359| => 2595784|12|1|12345|1|202402242359| => 2595784|12|1|12345|1|202402242359| => 12345|2595784|12|1|1|202402242359|
@@ -256,6 +264,7 @@ extend_due_dates()
         fi
     fi
     if [ -s "$tmp_file" ]; then
+        # Remove duplicate lines those that matched the first and second selection above.
         pipe.pl -oc1,c2,c3,c4 -P < "$tmp_file" | sort | uniq  >"$edit_charges_list"
     else
         pipe.pl -oc1,c2,c3,c4 -P < "$charges_list" >"$edit_charges_list"
